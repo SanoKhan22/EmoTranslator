@@ -29,4 +29,4 @@ To practice building web apps with Streamlit and have fun with emojis.
 
 ---
 
-*Thanks for checking out EmoTrans!*
+*Thanks for checking out EmoTranslator!*

@@ -2,13 +2,60 @@ import streamlit as st
 from translator import EmojiTranslator
 import json
 import os
-from dotenv import load_dotenv
-from openai import OpenAI
+import logging
 from datetime import datetime
-import pyperclip  # Add this import for clipboard operations
+from typing import Optional, List, Dict
+from dotenv import load_dotenv
+import pyperclip
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Constants
+MAX_CHARS = 200
+HISTORY_FILE = "storage.json"
+MAX_HISTORY_ITEMS = 50
+
+def load_history() -> List[Dict]:
+    """Load translation history from JSON file."""
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.info("No history file found, creating new one")
+        return []
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in history file, resetting")
+        return []
+
+def save_history(history: List[Dict]) -> None:
+    """Save translation history to JSON file."""
+    try:
+        # Keep only the most recent items
+        if len(history) > MAX_HISTORY_ITEMS:
+            history = history[-MAX_HISTORY_ITEMS:]
+        
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save history: {e}")
+        st.error("Failed to save translation history")
+
+def get_emoji_codes(text: str) -> List[str]:
+    """Extract Unicode codes for emojis in the text."""
+    return [f"U+{ord(c):04X}" for c in text if ord(c) > 127]  # Only non-ASCII characters
+
+def copy_to_clipboard_safe(text: str, message: str) -> None:
+    """Safely copy text to clipboard with error handling."""
+    try:
+        pyperclip.copy(text)
+        st.success(f"✅ {message}")
+    except Exception as e:
+        logger.error(f"Failed to copy to clipboard: {e}")
+        st.error("Failed to copy to clipboard. Please copy manually.")
 
 # Page config
 st.set_page_config(
@@ -170,100 +217,120 @@ with st.sidebar:
     )
     
     # Move translate button to sidebar
-    if st.button("🔁 Translate to Emoji", use_container_width=True):
-        if user_input:
-            try:
-                translator = EmojiTranslator()
-                emoji_result = translator.translate(user_input)
-                
-                # Get emoji codes, excluding ZWJ characters
-                emoji_codes = [f"U+{ord(c):X}" for c in emoji_result if ord(c) != 0x200D]
-                emoji_codes_str = ", ".join(emoji_codes)
-
-                # Update session state
-                st.session_state.translation_result = emoji_result
-                st.session_state.emoji_codes = emoji_codes_str
-
-                # Save to history with emoji codes
+    if st.button("🔁 Translate to Emoji", use_container_width=True, disabled=not user_input.strip()):
+        if user_input.strip():
+            with st.spinner("🤖 Translating your mood..."):
                 try:
-                    with open("storage.json", "r") as f:
-                        user_history = json.load(f)
-                except FileNotFoundError:
-                    user_history = []
+                    translator = EmojiTranslator()
+                    emoji_result = translator.translate(user_input.strip())
+                    
+                    if emoji_result and not emoji_result.startswith("❌"):
+                        # Get emoji codes
+                        emoji_codes = get_emoji_codes(emoji_result)
+                        emoji_codes_str = ", ".join(emoji_codes)
 
-                user_history.append({
-                    "input": user_input,
-                    "translation": emoji_result,
-                    "emoji_codes": emoji_codes
-                })
-                with open("storage.json", "w") as f:
-                    json.dump(user_history, f, indent=4)
-                
-                # Use st.rerun() instead of experimental_rerun
-                st.rerun()
-            except Exception as e:
-                st.error(f"An error occurred during translation: {e}")
+                        # Update session state
+                        st.session_state.translation_result = emoji_result
+                        st.session_state.emoji_codes = emoji_codes_str
+
+                        # Save to history
+                        history = load_history()
+                        history.append({
+                            "input": user_input.strip(),
+                            "translation": emoji_result,
+                            "emoji_codes": emoji_codes,
+                            "timestamp": datetime.now().isoformat(),
+                            "type": "text_to_emoji"
+                        })
+                        save_history(history)
+                        
+                        st.success("✨ Translation completed!")
+                        st.rerun()
+                    else:
+                        st.error("Translation failed. Please try again or check your API key.")
+                        
+                except ValueError as e:
+                    st.error(f"Configuration error: {e}")
+                    st.info("💡 Make sure your OpenAI API key is set in the .env file")
+                except Exception as e:
+                    logger.error(f"Translation error: {e}")
+                    st.error("❌ Translation failed. Please try again later.")
         else:
-            st.warning("Please enter some text to translate.")
+            st.warning("⚠️ Please enter some text to translate.")
     
     st.markdown("---")
     st.markdown("### 🔄 Reverse Translation")
     emoji_input = st.text_input("Enter emojis to interpret:", placeholder="e.g. 🎉✈️🌍")
     
-    if st.button("🔄 Interpret Emojis", use_container_width=True):
-        if emoji_input:
-            try:
-                translator = EmojiTranslator()
-                text_result = translator.translate_reverse(emoji_input)
-                
-                # Get emoji codes for the input emojis
-                emoji_codes = [f"U+{ord(c):X}" for c in emoji_input if ord(c) != 0x200D]
-                emoji_codes_str = ", ".join(emoji_codes)
-
-                # Update session state with both interpretation and codes
-                st.session_state.translation_result = text_result
-                st.session_state.emoji_codes = emoji_codes_str
-
-                # Add to history with reversed flag and emoji codes
+    if st.button("🔄 Interpret Emojis", use_container_width=True, disabled=not emoji_input.strip()):
+        if emoji_input.strip():
+            with st.spinner("🤖 Interpreting emojis..."):
                 try:
-                    with open("storage.json", "r") as f:
-                        user_history = json.load(f)
-                except FileNotFoundError:
-                    user_history = []
+                    translator = EmojiTranslator()
+                    text_result = translator.translate_reverse(emoji_input.strip())
+                    
+                    if text_result and not text_result.startswith("Error:"):
+                        # Get emoji codes for the input emojis
+                        emoji_codes = get_emoji_codes(emoji_input.strip())
+                        emoji_codes_str = ", ".join(emoji_codes)
 
-                user_history.append({
-                    "input": emoji_input,
-                    "translation": text_result,
-                    "type": "reverse",
-                    "emoji_codes": emoji_codes
-                })
-                with open("storage.json", "w") as f:
-                    json.dump(user_history, f, indent=4)
+                        # Update session state
+                        st.session_state.translation_result = text_result
+                        st.session_state.emoji_codes = emoji_codes_str
 
-            except Exception as e:
-                st.error(f"An error occurred during interpretation: {e}")
+                        # Add to history
+                        history = load_history()
+                        history.append({
+                            "input": emoji_input.strip(),
+                            "translation": text_result,
+                            "emoji_codes": emoji_codes,
+                            "timestamp": datetime.now().isoformat(),
+                            "type": "emoji_to_text"
+                        })
+                        save_history(history)
+                        
+                        st.success("✨ Interpretation completed!")
+                        st.rerun()
+                    else:
+                        st.error("Interpretation failed. Please try again or check your API key.")
+                        
+                except ValueError as e:
+                    st.error(f"Configuration error: {e}")
+                    st.info("💡 Make sure your OpenAI API key is set in the .env file")
+                except Exception as e:
+                    logger.error(f"Reverse translation error: {e}")
+                    st.error("❌ Interpretation failed. Please try again later.")
         else:
-            st.warning("Please enter some emojis to interpret.")
+            st.warning("⚠️ Please enter some emojis to interpret.")
 
 # Main content area
 st.markdown('<div class="title">✨ Emoji Mood Translator ✨</div>', unsafe_allow_html=True)
 
 # Update translation box display
 if st.session_state.translation_result:
+    emoji_codes_section = ""
+    if st.session_state.emoji_codes:
+        emoji_codes_section = f'<div class="emoji-codes"><span class="code-label">Emoji Codes:</span> {st.session_state.emoji_codes}</div>'
+    
     st.markdown(
         f'''<div class="translation-box">
             <div class="emoji-result">
                 {st.session_state.translation_result}
-                <span class="tooltip">
-                    <span class="copy-icon" onclick="navigator.clipboard.writeText('{st.session_state.translation_result}')">
-                        <i class="fas fa-copy"></i>
-                    </span>
-                </span>
             </div>
-            {f'<div class="emoji-codes"><span class="code-label">Emoji Codes:</span> {st.session_state.emoji_codes}<span class="tooltip"><span class="copy-icon" onclick="navigator.clipboard.writeText(\'{st.session_state.emoji_codes}\')"><i class="fas fa-copy"></i></span></span></div>' if st.session_state.emoji_codes else ''}
+            {emoji_codes_section}
         </div>''', 
         unsafe_allow_html=True
     )
+    
+    # Add copy buttons below the result
+    if st.session_state.translation_result:
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📋 Copy Result", key="copy_result"):
+                copy_to_clipboard_safe(st.session_state.translation_result, "Result copied!")
+        with col2:
+            if st.session_state.emoji_codes and st.button("📋 Copy Unicode", key="copy_unicode"):
+                copy_to_clipboard_safe(st.session_state.emoji_codes, "Unicode codes copied!")
 else:
     st.markdown(
         '''<div class="translation-box">
@@ -294,28 +361,44 @@ if st.session_state.get('component_value'):
             copy_to_clipboard(st.session_state.emoji_codes, "Codes copied!")
 
 # Load user history
-try:
-    with open("storage.json", "r") as f:
-        user_history = json.load(f)
-except FileNotFoundError:
-    user_history = []
+user_history = load_history()
 
 # Show history in main area
 st.subheader("🕘 Translation History")
 
-# Add search box for history
-search_query = st.text_input("🔍 Search history:", key="search_history", help="Search through your translation history")
-
-# Add clear history button in a column layout
-col1, col2 = st.columns([4, 1])
-with col2:
-    if st.button("🗑️ Clear"):
-        user_history = []
-        with open("storage.json", "w") as f:
-            json.dump(user_history, f, indent=4)
-
-# Modify history display to include search
 if user_history:
+    # Add controls for history
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        search_query = st.text_input("🔍 Search history:", 
+                                   key="search_history", 
+                                   help="Search through your translation history",
+                                   placeholder="Search translations...")
+    
+    with col2:
+        show_count = st.selectbox("Show:", [10, 25, 50], key="show_count")
+    
+    with col3:
+        if st.button("🗑️ Clear All", help="Clear entire history"):
+            st.session_state.confirm_clear = True
+
+    # Confirmation dialog for clearing history
+    if st.session_state.get('confirm_clear', False):
+        st.warning("⚠️ This will delete all your translation history. Are you sure?")
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("✅ Yes, clear all"):
+                save_history([])  # Save empty history
+                st.session_state.confirm_clear = False
+                st.success("🗑️ History cleared!")
+                st.rerun()
+        with col_no:
+            if st.button("❌ Cancel"):
+                st.session_state.confirm_clear = False
+                st.rerun()
+
+    # Filter and display history
     filtered_history = user_history
     if search_query:
         filtered_history = [
@@ -324,14 +407,39 @@ if user_history:
             or search_query.lower() in item['translation'].lower()
         ]
     
-    for item in reversed(filtered_history[-10:]):
-        is_reverse = item.get('type') == 'reverse'
-        st.markdown(f"""
-            <div class="history-box">
-                <b>{'Emojis' if is_reverse else 'Input'}:</b> {item['input']}<br>
-                <b>{'Meaning' if is_reverse else 'Translation'}:</b> {item['translation']}<br>
-                {'' if is_reverse else f'<small><b>Emoji Codes:</b> {", ".join(item.get("emoji_codes", []))}</small>'}
-            </div>
-        """, unsafe_allow_html=True)
+    # Show recent items
+    recent_history = list(reversed(filtered_history[-show_count:]))
+    
+    if recent_history:
+        for i, item in enumerate(recent_history):
+            is_emoji_to_text = item.get('type') == 'emoji_to_text'
+            timestamp = item.get('timestamp', '')
+            
+            # Format timestamp
+            if timestamp:
+                try:
+                    dt = datetime.fromisoformat(timestamp)
+                    time_str = dt.strftime("%m/%d %H:%M")
+                except:
+                    time_str = ""
+            else:
+                time_str = ""
+            
+            # Create expandable history item
+            with st.expander(f"{'📖' if is_emoji_to_text else '😊'} {item['input'][:30]}{'...' if len(item['input']) > 30 else ''} {time_str}"):
+                col_content, col_copy = st.columns([4, 1])
+                
+                with col_content:
+                    st.write(f"**{'Emojis' if is_emoji_to_text else 'Input'}:** {item['input']}")
+                    st.write(f"**{'Meaning' if is_emoji_to_text else 'Translation'}:** {item['translation']}")
+                    
+                    if item.get('emoji_codes'):
+                        st.caption(f"**Unicode:** {', '.join(item['emoji_codes'][:5])}{'...' if len(item['emoji_codes']) > 5 else ''}")
+                
+                with col_copy:
+                    if st.button("📋", key=f"copy_{i}", help="Copy result"):
+                        copy_to_clipboard_safe(item['translation'], "Copied!")
+    else:
+        st.info("🔍 No results found for your search.")
 else:
-    st.info("No translation history yet. Your results will appear here.")
+    st.info("📝 No translation history yet. Your translations will appear here after you use the app!")

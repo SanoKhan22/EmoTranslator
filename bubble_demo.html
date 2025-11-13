@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Background Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #0D1117 0%, #161B22 100%);
+            height: 100vh;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        .bubble {
+            position: absolute;
+            border-radius: 50%;
+            background: linear-gradient(135deg, 
+                rgba(88, 166, 255, 0.2) 0%, 
+                rgba(102, 126, 234, 0.1) 50%,
+                rgba(118, 75, 162, 0.2) 100%);
+            animation: rise 12s infinite linear;
+            pointer-events: none;
+        }
+
+        @keyframes rise {
+            0% {
+                transform: translateY(100vh) scale(0);
+                opacity: 0;
+            }
+            10% {
+                opacity: 0.6;
+                transform: translateY(90vh) scale(1);
+            }
+            90% {
+                opacity: 0.6;
+            }
+            100% {
+                transform: translateY(-100px) scale(0);
+                opacity: 0;
+            }
+        }
+
+        .bubble:nth-child(odd) {
+            animation-duration: 15s;
+            background: linear-gradient(135deg, 
+                rgba(240, 147, 251, 0.15) 0%, 
+                rgba(245, 87, 108, 0.1) 100%);
+        }
+
+        .content {
+            position: relative;
+            z-index: 10;
+            padding: 2rem;
+            color: white;
+            text-align: center;
+            margin-top: 20vh;
+        }
+
+        .title {
+            font-size: 3rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <h1 class="title">✨ Emoji Mood Translator ✨</h1>
+        <p>This is how floating bubbles would look in your app!</p>
+    </div>
+
+    <script>
+        function createBubble() {
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            
+            // Random size (20-80px)
+            const size = Math.random() * 60 + 20;
+            bubble.style.width = size + 'px';
+            bubble.style.height = size + 'px';
+            
+            // Random horizontal position
+            bubble.style.left = Math.random() * 100 + 'vw';
+            
+            // Random animation duration (8-16 seconds)
+            bubble.style.animationDuration = (Math.random() * 8 + 8) + 's';
+            
+            // Random delay
+            bubble.style.animationDelay = Math.random() * 3 + 's';
+            
+            document.body.appendChild(bubble);
+            
+            // Remove bubble after animation
+            setTimeout(() => {
+                if (bubble.parentNode) {
+                    bubble.parentNode.removeChild(bubble);
+                }
+            }, 18000);
+        }
+        
+        // Create bubbles continuously
+        setInterval(createBubble, 1500);
+        
+        // Create initial batch
+        for (let i = 0; i < 8; i++) {
+            setTimeout(createBubble, i * 500);
+        }
+    </script>
+</body>
+</html>
